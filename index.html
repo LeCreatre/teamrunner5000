@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Team Mascot Runner</title>
+    <style>
+        /* Apple Minimalism & Reset */
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body { 
+            display: flex; justify-content: center; align-items: center; 
+            height: 100vh; background-color: #000; overflow: hidden; touch-action: none;
+        }
+
+        /* Основной контейнер игры (Вертикальный формат 9:16) */
+        #game-container {
+            position: relative; width: 100vw; max-width: 500px; height: 100vh; max-height: 890px;
+            overflow: hidden; background: linear-gradient(to bottom, #87CEEB, #E0F6FF); /* Утро по умолчанию */
+            transition: background 2s ease; /* Плавная смена атмосферы */
+            box-shadow: 0 0 50px rgba(255,255,255,0.1);
+        }
+
+        /* Glassmorphism UI обертка */
+        .glass-panel {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 85%; padding: 40px 20px; border-radius: 24px; text-align: center;
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
+            z-index: 100;
+        }
+
+        /* Типографика */
+        h1 { font-size: 28px; font-weight: 700; color: #1d1d1f; margin-bottom: 20px; letter-spacing: -0.5px; }
+        p { font-size: 16px; color: #515154; margin-bottom: 30px; }
+        
+        /* Кнопки в стиле Apple */
+        .btn {
+            display: block; width: 100%; padding: 16px; margin-bottom: 12px;
+            border-radius: 14px; border: none; font-size: 17px; font-weight: 600;
+            cursor: pointer; transition: transform 0.1s, opacity 0.2s;
+        }
+        .btn:active { transform: scale(0.96); }
+        .btn-primary { background: #0071e3; color: white; }
+        .btn-secondary { background: rgba(0, 0, 0, 0.05); color: #1d1d1f; border: 1px solid rgba(0,0,0,0.1); }
+
+        /* Экраны */
+        #welcome-screen {
+            background-image: url('11.jpg'); /* Твое первое фото */
+            background-size: cover; background-position: center;
+            position: absolute; inset: 0; z-index: 1000;
+        }
+        #game-over-screen { display: none; }
+
+        /* Игровые элементы */
+        #score-display {
+            position: absolute; top: 50px; right: 20px; font-size: 24px; font-weight: 700;
+            color: #1d1d1f; z-index: 50; transition: color 2s ease;
+        }
+        
+        canvas { display: block; width: 100%; height: 100%; }
+
+        /* Цветовые темы (Утро, День, Вечер, Ночь) */
+        .theme-morning { background: linear-gradient(to bottom, #FFB75E, #ED8F03) !important; }
+        .theme-day { background: linear-gradient(to bottom, #56CCF2, #2F80ED) !important; }
+        .theme-evening { background: linear-gradient(to bottom, #8E2DE2, #4A00E0) !important; }
+        .theme-night { background: linear-gradient(to bottom, #0F2027, #203A43, #2C5364) !important; }
+        
+        /* Текст для ночных тем */
+        .text-light { color: #f5f5f7 !important; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="score-display">0</div>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="welcome-screen">
+        <div class="glass-panel" style="bottom: 10%; top: auto; transform: translate(-50%, 0);">
+            <h1>Team Mascot Runner</h1>
+            <p>Тапай по экрану, чтобы прыгать.</p>
+            <button class="btn btn-primary" onclick="startGame()">ИГРАТЬ</button>
+        </div>
+    </div>
+
+    <div id="game-over-screen" class="glass-panel">
+        <h1>Игра окончена</h1>
+        <p>Твой счет: <span id="final-score">0</span></p>
+        <button class="btn btn-primary" onclick="resetGame()">ИГРАТЬ ЕЩЕ РАЗ</button>
+        <button class="btn btn-secondary" onclick="showMenu()">ГЛАВНОЕ МЕНЮ</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const container = document.getElementById('game-container');
+    const scoreDisplay = document.getElementById('score-display');
+    const welcomeScreen = document.getElementById('welcome-screen');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const finalScoreDisplay = document.getElementById('final-score');
+
+    // Настройка Canvas под размер контейнера
+    function resizeCanvas() {
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Загрузка маскота (второе фото)
+    const mascotImg = new Image();
+    mascotImg.src = 'mascot.png'; // Убедись, что файл называется так же и лежит рядом
+
+    // Игровые переменные
+    let isPlaying = false;
+    let score = 0;
+    let gameSpeed = 5; // Начальная скорость
+    let animationId;
+    let currentThemeIndex = 0;
+
+    // Настройки маскота (Ограниченный прыжок)
+    const mascot = {
+        x: 50,
+        y: canvas.height - 150,
+        width: 60,
+        height: 100,
+        dy: 0,
+        jumpForce: -12, // Ограниченная сила прыжка (не слишком высоко)
+        gravity: 0.6,
+        grounded: true
+    };
+
+    let obstacles = [];
+    let clouds = [];
+
+    // Звуки (Web Audio API - заглушки для синтеза простых звуков)
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playJumpSound() {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.1);
+    }
+
+    // Управление
+    function jump() {
+        if (mascot.grounded && isPlaying) {
+            mascot.dy = mascot.jumpForce;
+            mascot.grounded = false;
+            playJumpSound();
+        }
+    }
+
+    // Обработка тапов (запрет двойного тапа реализуется через проверку mascot.grounded)
+    container.addEventListener('touchstart', (e) => { e.preventDefault(); jump(); }, {passive: false});
+    container.addEventListener('mousedown', jump);
+
+    // Смена атмосферы (каждые 500 очков)
+    function updateTheme() {
+        const themes = ['theme-morning', 'theme-day', 'theme-evening', 'theme-night'];
+        let newThemeIndex = Math.floor(score / 500) % 4;
+        
+        if (newThemeIndex !== currentThemeIndex) {
+            container.classList.remove(...themes);
+            container.classList.add(themes[newThemeIndex]);
+            currentThemeIndex = newThemeIndex;
+
+            // Меняем цвет текста для ночи
+            if(newThemeIndex === 2 || newThemeIndex === 3) {
+                scoreDisplay.classList.add('text-light');
+            } else {
+                scoreDisplay.classList.remove('text-light');
+            }
+        }
+    }
+
+    // Игровой цикл
+    function update() {
+        if (!isPlaying) return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Физика маскота
+        mascot.dy += mascot.gravity;
+        mascot.y += mascot.dy;
+
+        // Пол
+        const groundY = canvas.height - 50;
+        if (mascot.y + mascot.height >= groundY) {
+            mascot.y = groundY - mascot.height;
+            mascot.dy = 0;
+            mascot.grounded = true;
+        }
+
+        // Отрисовка маскота
+        if (mascotImg.complete) {
+            ctx.drawImage(mascotImg, mascot.x, mascot.y, mascot.width, mascot.height);
+        } else {
+            ctx.fillStyle = '#FF5733'; // Заглушка, если картинка не загрузилась
+            ctx.fillRect(mascot.x, mascot.y, mascot.width, mascot.height);
+        }
+
+        // Обновление и отрисовка препятствий
+        if (Math.random() < 0.015) { // Частота появления
+            obstacles.push({
+                x: canvas.width,
+                y: groundY - 40,
+                width: 30,
+                height: 40
+            });
+        }
+
+        ctx.fillStyle = '#1d1d1f';
+        for (let i = 0; i < obstacles.length; i++) {
+            let obs = obstacles[i];
+            obs.x -= gameSpeed;
+            
+            // Если ночь, делаем препятствия светлее
+            ctx.fillStyle = (currentThemeIndex >= 2) ? '#ffffff' : '#1d1d1f';
+            ctx.fillRect(obs.x, obs.y, obs.width, obs.height);
+
+            // Коллизия (проигрыш)
+            if (mascot.x < obs.x + obs.width &&
+                mascot.x + mascot.width > obs.x &&
+                mascot.y < obs.y + obs.height &&
+                mascot.y + mascot.height > obs.y) {
+                gameOver();
+            }
+        }
+
+        // Удаление ушедших препятствий и начисление очков
+        obstacles = obstacles.filter(obs => {
+            if (obs.x + obs.width < 0) {
+                score += 10;
+                scoreDisplay.innerText = score;
+                // Увеличение скорости каждые 100 очков
+                if (score % 100 === 0) gameSpeed += 0.5;
+                updateTheme();
+                return false;
+            }
+            return true;
+        });
+
+        // Линия пола
+        ctx.beginPath();
+        ctx.moveTo(0, groundY);
+        ctx.lineTo(canvas.width, groundY);
+        ctx.strokeStyle = (currentThemeIndex >= 2) ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.1)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        animationId = requestAnimationFrame(update);
+    }
+
+    function startGame() {
+        welcomeScreen.style.display = 'none';
+        gameOverScreen.style.display = 'none';
+        isPlaying = true;
+        score = 0;
+        gameSpeed = 5;
+        scoreDisplay.innerText = score;
+        obstacles = [];
+        mascot.y = canvas.height - 150;
+        container.className = 'theme-morning'; // Сброс темы
+        scoreDisplay.className = '';
+        
+        // Запуск аудио контекста при первом взаимодействии (требование браузеров)
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        
+        update();
+    }
+
+    function gameOver() {
+        isPlaying = false;
+        cancelAnimationFrame(animationId);
+        finalScoreDisplay.innerText = score;
+        gameOverScreen.style.display = 'block';
+    }
+
+    function resetGame() {
+        startGame();
+    }
+
+    function showMenu() {
+        gameOverScreen.style.display = 'none';
+        welcomeScreen.style.display = 'block';
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        scoreDisplay.innerText = "0";
+    }
+</script>
+
+</body>
+</html>
